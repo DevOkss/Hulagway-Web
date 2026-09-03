@@ -23,6 +23,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'role' => EnsureRole::class,
         ]);
+
+        // Trust the labsync Docker nginx reverse proxy (and localhost) so Laravel
+        // honours X-Forwarded-Proto (https) / X-Forwarded-For and generates correct
+        // absolute URLs + client IPs. The Docker network uses 172.18.0.0/16.
+        $middleware->trustProxies(at: ['172.18.0.0/16', '127.0.0.1']);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //
