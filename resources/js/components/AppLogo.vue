@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import AppLogoIcon from '@/components/AppLogoIcon.vue';
-
 interface Props {
     class?: string;
 }
@@ -9,10 +7,8 @@ defineProps<Props>();
 </script>
 
 <template>
-    <div class="flex aspect-square size-8 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
-        <AppLogoIcon class="size-5 fill-current text-white dark:text-black" />
-    </div>
+    <img src="/images/logo.png" alt="HULAGWAY" class="size-8 rounded-lg object-contain" />
     <div class="ml-1 grid flex-1 text-left text-sm">
-        <span class="mb-0.5 truncate font-semibold leading-none">Laravel Starter Kit</span>
+        <span class="font-heading mb-0.5 truncate font-semibold leading-none tracking-wide text-brand-600 dark:text-brand-400">HULAGWAY</span>
     </div>
 </template>
