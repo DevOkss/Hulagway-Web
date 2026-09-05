@@ -33,6 +33,10 @@ Central server for the **HULAGWAY** system — a community mapping, survey, and 
 - Offline sync via batch endpoint `POST /api/mobile/sync`; duplicates rejected by `local_uuid`
 - Branding: orange gradient palette anchored on `#F97316`, fonts DM Sans (body/UI) + Poppins (headings)
 
+## Production (as of 2026-09-05)
+**Live at https://hulagway.devokss.online** — full runbook in **`DEPLOYMENT.md`**; config artifacts under `deploy/`.
+Shared Hostinger VPS `76.13.220.161`: TLS/public ports belong to the LabSync Docker nginx proxy (`deploy/proxy/10-hulagway.conf` → proxied to host nginx `deploy/host-nginx-hulagway.conf` on :8091 → php8.3-fpm). Apps on `devokss.online` must keep `SESSION_DOMAIN=null` — a `.devokss.online` session domain here leaked `XSRF-TOKEN`/`hulagway_session` onto every sibling subdomain and broke their CSRF (perennial 419), fixed in production 2026-09-05 (repo `.env` was always correct; the VPS `.env` had drifted — remember `config:cache` overrides it silently). Certificates are host-certbot-managed and synced to the proxy by a renewal hook.
+
 ## Related Projects
 - `../hulagway-pwa` — Vue 3 + Pinia field data collection PWA (talks to `/api/*`)
 - `../reference-design` — Horizon UI admin template (visual reference only)
