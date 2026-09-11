@@ -507,6 +507,10 @@ const buildAggUrl = (barangayId?: number) => {
         else if (v.startsWith('field_')) fCodes.push(v.replace('field_', ''));
         else fCodes.push(v);
     });
+    // Always include poor family (Category 1+2) for dialog/card consistency — even if not checked
+    if (!fCodes.includes('poor_cat2') && availableFields.value.some((f) => f.value === 'field_poor_cat2')) {
+        fCodes.push('poor_cat2');
+    }
     qIds.forEach((id) => params.append('question_ids[]', id));
     fCodes.forEach((c) => params.append('field_codes[]', c));
     return `/api/map/aggregation?${params.toString()}`;

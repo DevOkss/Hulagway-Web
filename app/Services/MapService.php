@@ -803,14 +803,20 @@ class MapService
                 $key = $fieldInfo[$code]['key'];
                 $label = $fieldInfo[$code]['label'];
 
-                // Poor Family — itemized over its 3 survey answers
+                // Poor Family — itemized over its options, but total is only Category 1 + 2 (poor)
                 if ($code === 'poor_cat2') {
                     $items = $this->padChoiceItems($poorItems[$bid] ?? [], $poorOptions);
+                    $poorTotal = 0;
+                    foreach ($items as $it) {
+                        if (str_starts_with((string) $it['name'], 'Category 1') || str_starts_with((string) $it['name'], 'Category 2')) {
+                            $poorTotal += (int) $it['count'];
+                        }
+                    }
                     $fields[] = [
                         'key' => 'field_'.$code,
                         'label' => $label,
                         'type' => 'choice',
-                        'total' => array_sum(array_column($items, 'count')),
+                        'total' => $poorTotal,
                         'items' => $items,
                     ];
 
