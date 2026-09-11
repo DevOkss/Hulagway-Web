@@ -65,6 +65,7 @@ const extLoading = ref(false);
 const extOpenIds = ref<number[]>([]);
 
 const selected = ref<any>(null);
+const highlightedBarangayIds = ref<number[]>([]);
 const currentFeatures = ref<any[]>([]);
 const currentActivityMarkers = ref<any[]>([]);
 const mapLoading = ref(false);
@@ -412,7 +413,10 @@ const updateMap = (fit = false) => {
             layer.bindTooltip(`${header}${progHtml}${extListHtml}${sdgHtml}`, { sticky: true });
         }
     });
-    geoLayer.setStyle((feature: any) => highlightStyle(feature, max, String(feature?.id) === String(selected.value?.id) || String(feature?.properties?.id) === String(selected.value?.id)));
+    const isHighlighted = (feature: any) =>
+        highlightedBarangayIds.value.includes(Number(feature.id) || Number(feature.properties?.id)) ||
+        highlightedBarangayIds.value.includes(Number(feature.properties?.id));
+    geoLayer.setStyle((feature: any) => highlightStyle(feature, max, String(feature?.id) === String(selected.value?.id) || String(feature?.properties?.id) === String(selected.value?.id) || isHighlighted(feature)));
 
     if (markersLayer) {
         markersLayer.clearLayers();
@@ -540,6 +544,17 @@ const closeAggDialog = () => {
 };
 
 const openAllDialog = async () => {
+    // Highlight barangays having household on the survey (value > 0)
+    highlightedBarangayIds.value = currentFeatures.value.filter((f: any) => (f.properties?.value ?? 0) > 0).map((f: any) => Number(f.id) || Number(f.properties?.id));
+    // Refresh map style to show highlight
+    if (geoLayer && currentFeatures.value.length) {
+        const max = Math.max(...currentFeatures.value.map((f: any) => f.properties?.value ?? 0), 0);
+        geoLayer.setStyle((feature: any) => {
+            const isHighlighted = highlightedBarangayIds.value.includes(Number(feature.id) || Number(feature.properties?.id));
+            const isSelected = String(feature?.id) === String(selected.value?.id) || String(feature?.properties?.id) === String(selected.value?.id);
+            return highlightStyle(feature, max, isSelected || isHighlighted);
+        });
+    }
     showAllDialog.value = true;
     allLoading.value = true;
     allDetail.value = null;
@@ -559,6 +574,11 @@ const openAllDialog = async () => {
 const closeAllDialog = () => {
     showAllDialog.value = false;
     allDetail.value = null;
+    highlightedBarangayIds.value = [];
+    if (geoLayer && currentFeatures.value.length) {
+        const max = Math.max(...currentFeatures.value.map((f: any) => f.properties?.value ?? 0), 0);
+        geoLayer.setStyle((feature: any) => highlightStyle(feature, max, String(feature?.id) === String(selected.value?.id) || String(feature?.properties?.id) === String(selected.value?.id)));
+    }
 };
 
 const toggleOpenAll = (id: number) => {
@@ -568,10 +588,27 @@ const toggleOpenAll = (id: number) => {
 };
 
 const openExtDialog = () => {
+    // Highlight barangays having extension activities (value > 0)
+    highlightedBarangayIds.value = currentFeatures.value.filter((f: any) => (f.properties?.value ?? 0) > 0).map((f: any) => Number(f.id) || Number(f.properties?.id));
+    if (geoLayer && currentFeatures.value.length) {
+        const max = Math.max(...currentFeatures.value.map((f: any) => f.properties?.value ?? 0), 0);
+        geoLayer.setStyle((feature: any) => {
+            const isHighlighted = highlightedBarangayIds.value.includes(Number(feature.id) || Number(feature.properties?.id));
+            const isSelected = String(feature?.id) === String(selected.value?.id) || String(feature?.properties?.id) === String(selected.value?.id);
+            return highlightStyle(feature, max, isSelected || isHighlighted);
+        });
+    }
     extOpenIds.value = [];
     showExtDialog.value = true;
 };
-const closeExtDialog = () => { showExtDialog.value = false; };
+const closeExtDialog = () => {
+    showExtDialog.value = false;
+    highlightedBarangayIds.value = [];
+    if (geoLayer && currentFeatures.value.length) {
+        const max = Math.max(...currentFeatures.value.map((f: any) => f.properties?.value ?? 0), 0);
+        geoLayer.setStyle((feature: any) => highlightStyle(feature, max, String(feature?.id) === String(selected.value?.id) || String(feature?.properties?.id) === String(selected.value?.id)));
+    }
+};
 const toggleExtOpen = (id: number) => {
     const idx = extOpenIds.value.indexOf(id);
     if (idx >= 0) extOpenIds.value.splice(idx, 1);
@@ -928,15 +965,35 @@ onMounted(() => {
                     <div class="mt-4 max-h-[60vh] overflow-auto rounded-xl border border-neutral-200">
                         <div v-if="allLoading" class="p-6 text-center text-xs text-neutral-400">Loading aggregations…</div>
                         <template v-else-if="allDetail?.barangays?.length">
-                            <div v-for="b in allDetail.barangays" :key="b.id" class="border-b border-neutral-100 last:border-b-0">
+                            <div
+                                v-for="b in allDetail.barangays"
+                                :key="b.id"
+                                :class="[
+                                    'border-b last:border-b-0',
+                                    Number(b.households ?? 0) > 0 ? 'bg-brand-50 border-l-4 border-brand-500' : 'border-neutral-100 bg-white',
+                                ]"
+                            >
                                 <button
                                     type="button"
-                                    class="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition hover:bg-neutral-50"
+                                    :class="[
+                                        'flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition',
+                                        Number(b.households ?? 0) > 0 ? 'bg-brand-500 text-white hover:bg-brand-600' : 'hover:bg-neutral-50',
+                                    ]"
                                     @click="toggleOpenAll(b.id)"
                                 >
-                                    <span class="font-medium text-neutral-700">{{ b.name }}</span>
+                                    <span :class="['font-medium', Number(b.households ?? 0) > 0 ? 'text-white' : 'text-neutral-700']">
+                                        {{ b.name }}
+                                        <span
+                                            v-if="Number(b.households ?? 0) > 0"
+                                            class="ml-1.5 inline-flex items-center gap-1 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-bold text-brand-600"
+                                            >{{ Number(b.households ?? 0) }} <span class="hidden sm:inline">responses</span></span
+                                        >
+                                    </span>
                                     <span class="flex items-center gap-2">
-                                        <span class="text-xs text-neutral-500">{{ Number(b.households ?? 0).toLocaleString() }} households</span>
+                                        <span
+                                            :class="['text-xs', Number(b.households ?? 0) > 0 ? 'font-semibold text-white' : 'text-neutral-500']"
+                                            >{{ Number(b.households ?? 0).toLocaleString() }} households</span
+                                        >
                                         <span class="text-[10px] text-neutral-400">{{ openAllIds.includes(b.id) ? '−' : '+' }}</span>
                                     </span>
                                 </button>
