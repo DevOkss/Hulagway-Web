@@ -36,7 +36,7 @@ defineProps<{
                 </h1>
                 <p class="mx-auto mt-5 max-w-xl text-base leading-relaxed text-white/85 lg:mx-0">
                     HULAGWAY unites community surveys, GIS mapping, and extension activity monitoring — so the
-                    College of Agriculture and Extension Services can see every barangay of Tangub City clearly
+                    Tangub City Global College - Community and Academic Extension Services and LGU can see every barangay of Tangub City clearly
                     and respond where it matters most.
                 </p>
 
@@ -86,7 +86,7 @@ defineProps<{
         </main>
 
         <footer class="border-t border-white/20 py-6 text-center text-xs text-white/70">
-            © {{ new Date().getFullYear() }} HULAGWAY · CAES · City of Tangub, Misamis Occidental
+            © {{ new Date().getFullYear() }} HULAGWAY · Tangub City Global College - CAES & LGU · City of Tangub, Misamis Occidental
         </footer>
     </div>
 </template>

@@ -128,12 +128,20 @@ class MapService
 
         // Compute per-barangay breakdown
         $fieldBreakdowns = []; // [barangay_id => [field => count]]
-        $totalPerBarangay = []; // [barangay_id => total for choropleth]
+        $totalPerBarangay = []; // [barangay_id => total for choropleth — distinct household responses, NOT sum of conditions]
+
+        // BUGFIX: Marker must show total household responses per barangay (e.g. 3 households => marker 3),
+        // not sum of each condition (e.g. land 3 + water 3 = 6). Pre-compute distinct responses per barangay.
+        $responseCounts = SurveyResponse::where('survey_id', $surveyId)
+            ->whereNotNull('barangay_id')
+            ->when($barangayIds, fn ($q) => $q->whereIn('barangay_id', $barangayIds))
+            ->selectRaw('barangay_id, COUNT(*) as aggregate')
+            ->groupBy('barangay_id')
+            ->pluck('aggregate', 'barangay_id');
 
         foreach ($barangays as $barangay) {
             $bid = $barangay->id;
             $fieldBreakdowns[$bid] = [];
-            $total = 0;
 
             // Handle questionIds (survey_questions)
             foreach ($questionIds as $qid) {
@@ -144,7 +152,6 @@ class MapService
                 $val = $counts[$bid] ?? 0;
                 // For likert/text, we count total responses for that question per barangay
                 $fieldBreakdowns[$bid][$question->question_text] = (int) $val;
-                $total += (int) $val;
             }
 
             // Handle fieldCodes (housing, poor_cat2, pwd etc, plus gov fields)
@@ -157,12 +164,13 @@ class MapService
                     case 'water':
                     case 'toilet':
                     case 'livelihood':
-                        // Find question by code and count per barangay
+                        // Find question by code and count per barangay — store under fixed key matching fieldCodeInfo()
                         $q = \App\Models\SurveyQuestion::where('survey_id', $surveyId)->where('code', $code)->first();
                         if ($q) {
                             $counts = $this->countsForChoiceQuestion($q->id, $surveyId, null);
                             $val = $counts[$bid] ?? 0;
-                            $fieldBreakdowns[$bid][$q->question_text] = (int) $val;
+                            [$fixedKey] = $this->fieldCodeInfo($code);
+                            $fieldBreakdowns[$bid][$fixedKey] = (int) $val;
                         }
                         break;
                     case 'poor_cat2':
@@ -180,7 +188,8 @@ class MapService
                         if ($q) {
                             $counts = $this->countsForChoiceQuestion($q->id, $surveyId, null);
                             $val = $counts[$bid] ?? 0;
-                            $fieldBreakdowns[$bid][$q->question_text] = (int) $val;
+                            [$fixedKey] = $this->fieldCodeInfo($code);
+                            $fieldBreakdowns[$bid][$fixedKey] = (int) $val;
                         }
                         break;
                     case 'gov_satisfaction':
@@ -188,7 +197,8 @@ class MapService
                         if ($q) {
                             $counts = $this->countsForChoiceQuestion($q->id, $surveyId, null);
                             $val = $counts[$bid] ?? 0;
-                            $fieldBreakdowns[$bid][$q->question_text] = (int) $val;
+                            [$fixedKey] = $this->fieldCodeInfo($code);
+                            $fieldBreakdowns[$bid][$fixedKey] = (int) $val;
                         }
                         break;
                     case 'suggestions':
@@ -196,7 +206,8 @@ class MapService
                         if ($q) {
                             $counts = $this->countsForChoiceQuestion($q->id, $surveyId, null);
                             $val = $counts[$bid] ?? 0;
-                            $fieldBreakdowns[$bid][$q->question_text] = (int) $val;
+                            [$fixedKey] = $this->fieldCodeInfo($code);
+                            $fieldBreakdowns[$bid][$fixedKey] = (int) $val;
                         }
                         break;
                     case 'pwd':
@@ -267,10 +278,10 @@ class MapService
                         $fieldBreakdowns[$bid][$code] = (int) $val;
                         break;
                 }
-                $total += (int) $val;
+                // Do NOT sum conditions — value is distinct household responses per barangay
             }
 
-            $totalPerBarangay[$bid] = $total;
+            $totalPerBarangay[$bid] = (int) ($responseCounts[$bid] ?? 0);
         }
 
         // If no fields selected, fallback to total responses per barangay

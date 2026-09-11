@@ -17,7 +17,7 @@ class ExtensionActivityDay extends Model
     {
         return [
             'day_number' => 'integer',
-            'activity_date' => 'date',
+            'activity_date' => 'date:Y-m-d',
         ];
     }
 

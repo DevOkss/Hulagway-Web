@@ -42,6 +42,7 @@ const selectedSurvey = ref<string>('');
 const selectedProgram = ref<string>('');
 const selectedFields = ref<string[]>([]);
 const selectedBarangays = ref<number[]>([]);
+const pendingBarangays = ref<number[]>([]);
 const selectedSdgs = ref<number[]>([]);
 const sdgFilterOpen = ref(false);
 const selectedStatuses = ref<string[]>([]);
@@ -130,14 +131,22 @@ const filteredBarangays = computed(() => {
 const isAllBarangays = computed(() => selectedBarangays.value.length === 0);
 
 const toggleBarangay = (id: number) => {
-    const idx = selectedBarangays.value.indexOf(id);
-    if (idx >= 0) selectedBarangays.value.splice(idx, 1);
-    else selectedBarangays.value.push(id);
+    const idx = pendingBarangays.value.indexOf(id);
+    if (idx >= 0) pendingBarangays.value.splice(idx, 1);
+    else pendingBarangays.value.push(id);
 };
 const clearBarangayFilter = () => {
+    pendingBarangays.value = [];
     selectedBarangays.value = [];
     barangaySearch.value = '';
 };
+const applyBarangayFilter = () => {
+    selectedBarangays.value = [...pendingBarangays.value];
+    barangayFilterOpen.value = false;
+};
+watch(barangayFilterOpen, (open) => {
+    if (open) pendingBarangays.value = [...selectedBarangays.value];
+});
 
 const fetchFields = async () => {
     if (!selectedSurvey.value) {
@@ -632,7 +641,7 @@ onMounted(() => {
                             </template>
                             <p v-if="!availableFields.length" class="px-2 py-2 text-xs text-neutral-400">No fields found for this survey.</p>
                         </div>
-                        <p class="mt-1 text-[10px] text-neutral-400">{{ selectedFields.length }} fields selected — map shows sum per barangay.</p>
+                        <p class="mt-1 text-[10px] text-neutral-400">{{ selectedFields.length }} fields selected — marker shows total household responses per barangay (breakdown per condition in dialog).</p>
                     </div>
 
                     <div class="rounded-xl border border-neutral-200 p-3">
@@ -765,16 +774,27 @@ onMounted(() => {
                             </div>
                             <div class="mt-2 max-h-44 overflow-auto rounded-lg border border-neutral-100 bg-neutral-50 p-1">
                                 <label v-for="b in filteredBarangays.slice(0, 50)" :key="b.id" class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-white">
-                                    <input type="checkbox" :checked="selectedBarangays.includes(b.id)" @change="toggleBarangay(b.id)" class="size-3.5 accent-brand-500" />
+                                    <input type="checkbox" :checked="pendingBarangays.includes(b.id)" @change="toggleBarangay(b.id)" class="size-3.5 accent-brand-500" />
                                     <span class="truncate">{{ b.name }}</span>
                                 </label>
                                 <p v-if="!filteredBarangays.length" class="px-2 py-2 text-xs text-neutral-400">No matching barangay.</p>
                             </div>
-                            <div v-if="selectedBarangays.length" class="mt-2 flex flex-wrap gap-1">
-                                <span v-for="id in selectedBarangays" :key="id" class="inline-flex items-center gap-1 rounded bg-brand-100 px-2 py-0.5 text-[11px] font-medium text-brand-700">
+                            <div v-if="pendingBarangays.length" class="mt-2 flex flex-wrap gap-1">
+                                <span v-for="id in pendingBarangays" :key="id" class="inline-flex items-center gap-1 rounded bg-brand-100 px-2 py-0.5 text-[11px] font-medium text-brand-700">
                                     {{ props.barangays.find((b) => b.id === id)?.name ?? id }}
                                     <button type="button" class="text-brand-400 hover:text-brand-700" @click="toggleBarangay(id)">✕</button>
                                 </span>
+                            </div>
+                            <div class="mt-3 flex gap-2">
+                                <button
+                                    v-if="pendingBarangays.length"
+                                    type="button"
+                                    class="flex-1 rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-600"
+                                    @click="applyBarangayFilter"
+                                >
+                                    Filter ({{ pendingBarangays.length }})
+                                </button>
+                                <button type="button" class="flex-1 rounded-lg border px-3 py-1.5 text-xs hover:bg-neutral-50" @click="barangayFilterOpen = false">Cancel</button>
                             </div>
                         </div>
                     </div>

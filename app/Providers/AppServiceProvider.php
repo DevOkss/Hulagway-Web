@@ -20,9 +20,14 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // Front controller sits behind a TLS-terminating reverse proxy (Docker nginx).
-        // Force absolute asset/route/Ziggy URLs to https so the browser does not
-        // block them as mixed content (white screen).
-        URL::forceScheme('https');
+        // DEPLOYMENT: Production sits behind TLS-terminating Docker nginx proxy.
+        // Force https so absolute asset/route/Ziggy URLs don't get blocked as mixed content.
+        // Original deployment config (kept for easy re-deploy — uncomment if you want unconditional force):
+        // URL::forceScheme('https');
+
+        // Local dev runs plain http (8001/5174) — only force https in production.
+        if ($this->app->environment('production')) {
+            URL::forceScheme('https');
+        }
     }
 }

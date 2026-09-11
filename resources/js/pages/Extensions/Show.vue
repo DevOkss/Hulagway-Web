@@ -8,8 +8,17 @@ import type { BreadcrumbItemType } from '@/types';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Calendar, ChevronDown, Download, FileDown, FileSpreadsheet, FileText, GanttChart, ImageIcon, Pencil, Plus, Trash2 } from 'lucide-vue-next';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { usePage } from '@inertiajs/vue3';
+
+// Helpers for Y-m-d date strings — avoid UTC shift (app timezone is Asia/Manila)
+// Treat Y-m-d as local date without time, not as UTC midnight
+const ymdToDate = (ymd: string) => new Date(ymd.substring(0, 10) + 'T00:00:00');
+const formatYMD = (ymd: string, opts?: Intl.DateTimeFormatOptions) => {
+    if (!ymd) return '';
+    return ymdToDate(ymd).toLocaleDateString(undefined, { ...opts, timeZone: 'Asia/Manila' });
+};
+const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date());
 
 interface Document {
     id: number;
@@ -96,7 +105,7 @@ const statusTint = computed(
 );
 
 const statusHint = computed(() => {
-    if (props.activity.status === 'planned') return 'Not yet started — starts on ' + new Date(props.activity.start_date).toLocaleDateString();
+    if (props.activity.status === 'planned') return 'Not yet started — starts on ' + formatYMD(props.activity.start_date);
     if (props.activity.status === 'ongoing') return 'Ongoing — between start and end dates';
     if (props.activity.status === 'completed') return 'Completed — past end date';
     return 'Cancelled';
@@ -125,36 +134,10 @@ const toggleCollaborator = (programId: number, event: Event) => {
     );
 };
 
-// Daily document upload — date is automatic current day of the event
-const todayIso = new Date().toISOString().substring(0, 10);
-const uploadForm = useForm({
-    documents: [] as File[],
-    document_activity_date: todayIso,
-    document_caption: '',
-});
-
-const onDocuments = (event: Event) => {
-    const files = (event.target as HTMLInputElement).files;
-    uploadForm.documents = files ? Array.from(files) : [];
-};
-
-const upload = () => {
-    // Always tag with current day — spoof PUT via POST for multipart (Inertia file upload)
-    uploadForm.transform((data) => ({ ...data, _method: 'put' as const, document_activity_date: todayIso })).post(`/extensions/${props.activity.id}`, {
-        forceFormData: true,
-        preserveScroll: true,
-        onSuccess: () => {
-            uploadForm.documents = [];
-            uploadForm.document_caption = '';
-        },
-        onFinish: () => uploadForm.transform((data) => data),
-    });
-};
-
 const groupedDocuments = computed(() => {
     const groups: Record<string, Document[]> = {};
     for (const doc of props.activity.documents) {
-        const key = doc.activity_date ? new Date(doc.activity_date).toLocaleDateString() : 'Initial Document';
+        const key = doc.activity_date ? formatYMD(doc.activity_date) : 'Initial Document';
         if (!groups[key]) groups[key] = [];
         groups[key].push(doc);
     }
@@ -183,6 +166,60 @@ const timelineDates = computed(() => {
     // Fallback: single day from start_date
     return props.activity.start_date ? [props.activity.start_date.substring(0, 10)] : [];
 });
+
+// Inclusive dates for document upload — every date from start to end inclusive (kept for reference, not used for select which now uses timelineDates only)
+const inclusiveDates = computed(() => {
+    const startStr = props.activity.start_date?.substring(0, 10);
+    const endStr = (props.activity.end_date ?? props.activity.start_date)?.substring(0, 10);
+    if (!startStr || !endStr) return timelineDates.value;
+    const dates: string[] = [];
+    // Increment Y-m-d without UTC shift (use local Date with Y,M,D)
+    const [sy, sm, sd] = startStr.split('-').map(Number);
+    const [ey, em, ed] = endStr.split('-').map(Number);
+    const start = new Date(sy, sm - 1, sd);
+    const end = new Date(ey, em - 1, ed);
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        dates.push(`${y}-${m}-${day}`);
+    }
+    return dates.length ? dates : timelineDates.value;
+});
+
+const uploadForm = useForm({
+    documents: [] as File[],
+    document_activity_date: timelineDates.value.includes(todayIso) ? todayIso : (timelineDates.value[0] ?? ''),
+    document_caption: '',
+});
+
+const onDocuments = (event: Event) => {
+    const files = (event.target as HTMLInputElement).files;
+    uploadForm.documents = files ? Array.from(files) : [];
+};
+
+const upload = () => {
+    // Tag with user-selected activity day — only the 3 selected days (e.g. Sept 7,9,11) are selectable via option
+    uploadForm.transform((data) => ({ ...data, _method: 'put' as const })).post(`/extensions/${props.activity.id}`, {
+        forceFormData: true,
+        preserveScroll: true,
+        onSuccess: () => {
+            uploadForm.documents = [];
+            uploadForm.document_caption = '';
+        },
+        onFinish: () => uploadForm.transform((data) => data),
+    });
+};
+
+// Keep selected date in sync if activity days change (e.g. after edit)
+watch(
+    () => timelineDates.value,
+    (dates) => {
+        if (dates.length && !dates.includes(uploadForm.document_activity_date)) {
+            uploadForm.document_activity_date = dates.includes(todayIso) ? todayIso : dates[0] ?? '';
+        }
+    },
+);
 
 const tasksByDate = computed(() => {
     const map: Record<string, DailyTask[]> = {};
@@ -219,7 +256,7 @@ const todayDayNumber = computed(() => {
 
 const dailyTaskForm = useForm({
     title: '',
-    scheduled_date: timelineDates.value[0] ?? new Date().toISOString().substring(0, 10),
+    scheduled_date: timelineDates.value[0] ?? todayIso,
     description: '',
 });
 const editingTaskId = ref<number | null>(null);
@@ -234,7 +271,7 @@ const openDailyTaskDialog = (task?: DailyTask) => {
         editingTaskId.value = null;
         dailyTaskForm.title = '';
         dailyTaskForm.description = '';
-        dailyTaskForm.scheduled_date = timelineDates.value[0] ?? new Date().toISOString().substring(0, 10);
+        dailyTaskForm.scheduled_date = timelineDates.value[0] ?? todayIso;
     }
     dailyTaskDialogOpen.value = true;
 };
@@ -308,8 +345,8 @@ const removeDailyTask = (id: number) => {
                 <section class="hcard-p lg:col-span-1 ">
                     <h2 class="font-heading mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">Details</h2>
                     <dl class="space-y-2 text-sm">
-                        <div class="flex justify-between gap-2"><dt class="text-neutral-400">Start</dt><dd>{{ new Date(activity.start_date).toLocaleDateString() }}</dd></div>
-                        <div class="flex justify-between gap-2"><dt class="text-neutral-400">End</dt><dd>{{ activity.end_date ? new Date(activity.end_date).toLocaleDateString() : '—' }}</dd></div>
+                        <div class="flex justify-between gap-2"><dt class="text-neutral-400">Start</dt><dd>{{ formatYMD(activity.start_date) }}</dd></div>
+                        <div class="flex justify-between gap-2"><dt class="text-neutral-400">End</dt><dd>{{ activity.end_date ? formatYMD(activity.end_date) : '—' }}</dd></div>
                         <div class="flex justify-between gap-2"><dt class="text-neutral-400">Faculty / Students</dt><dd>{{ activity.faculty_participants }} / {{ activity.student_participants }}</dd></div>
                         <div class="flex justify-between gap-2"><dt class="text-neutral-400">Beneficiaries</dt><dd>{{ activity.beneficiaries.toLocaleString() }}</dd></div>
                     </dl>
@@ -340,8 +377,8 @@ const removeDailyTask = (id: number) => {
                         class="mt-1 text-[11px] font-medium"
                         :class="hasUploadForToday ? 'text-emerald-600' : 'text-amber-600'"
                     >
-                        <template v-if="hasUploadForToday">✓ Upload recorded for today ({{ new Date(todayIso).toLocaleDateString() }}) — progress updated.</template>
-                        <template v-else>● No upload yet for today ({{ new Date(todayIso).toLocaleDateString() }}) — upload to advance progress.</template>
+                        <template v-if="hasUploadForToday">✓ Upload recorded for today ({{ formatYMD(todayIso) }}) — progress updated.</template>
+                        <template v-else>● No upload yet for today ({{ formatYMD(todayIso) }}) — upload to advance progress.</template>
                     </p>
                     <p v-else class="mt-1 text-[11px] text-neutral-400">Today is not an activity day — progress advances only on activity days with uploads.</p>
                 </section>
@@ -365,12 +402,12 @@ const removeDailyTask = (id: number) => {
                                 v-for="date in timelineDates"
                                 :key="date"
                                 class="rounded-lg border p-2 text-center"
-                                :class="new Date(date).toDateString() === new Date().toDateString() ? 'border-brand-300 bg-brand-50' : 'border-neutral-200 bg-neutral-50'"
+                                :class="date === todayIso ? 'border-brand-300 bg-brand-50' : 'border-neutral-200 bg-neutral-50'"
                             >
-                                <div class="text-[11px] font-semibold uppercase tracking-wide" :class="new Date(date).toDateString() === new Date().toDateString() ? 'text-brand-700' : 'text-neutral-500'">
-                                    {{ new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) }}
+                                <div class="text-[11px] font-semibold uppercase tracking-wide" :class="date === todayIso ? 'text-brand-700' : 'text-neutral-500'">
+                                    {{ formatYMD(date, { month: 'short', day: 'numeric' }) }}
                                 </div>
-                                <div class="text-[10px] text-neutral-400">{{ new Date(date).toLocaleDateString(undefined, { weekday: 'short' }) }}</div>
+                                <div class="text-[10px] text-neutral-400">{{ formatYMD(date, { weekday: 'short' }) }}</div>
                                 <div class="mt-1 text-[10px] font-medium" :class="(tasksByDate[date]?.length ?? 0) > 0 ? 'text-brand-600' : 'text-neutral-400'">
                                     {{ tasksByDate[date]?.length ?? 0 }} task{{ (tasksByDate[date]?.length ?? 0) === 1 ? '' : 's' }}
                                 </div>
@@ -399,7 +436,7 @@ const removeDailyTask = (id: number) => {
                     <div v-for="task in dailyTasks" :key="'list-'+task.id" class="flex items-center justify-between gap-3 p-3">
                         <div class="min-w-0">
                             <div class="flex items-center gap-2">
-                                <span class="rounded bg-brand-500/10 px-2 py-0.5 text-[11px] font-semibold text-brand-700">{{ new Date(task.scheduled_date).toLocaleDateString() }}</span>
+                                <span class="rounded bg-brand-500/10 px-2 py-0.5 text-[11px] font-semibold text-brand-700">{{ formatYMD(task.scheduled_date) }}</span>
                                 <span class="truncate text-sm font-medium">{{ task.title }}</span>
                             </div>
                             <p v-if="task.description" class="truncate text-xs text-neutral-500">{{ task.description }}</p>
@@ -429,13 +466,13 @@ const removeDailyTask = (id: number) => {
                                 class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                             >
                                 <option v-for="(date, idx) in timelineDates" :key="date" :value="date">
-                                    Day {{ idx + 1 }} — {{ new Date(date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) }}
+                                    Day {{ idx + 1 }} — {{ formatYMD(date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) }}
                                 </option>
                                 <option
                                     v-if="dailyTaskForm.scheduled_date && !timelineDates.includes(dailyTaskForm.scheduled_date)"
                                     :value="dailyTaskForm.scheduled_date"
                                 >
-                                    {{ new Date(dailyTaskForm.scheduled_date).toLocaleDateString() }} (previous)
+                                    {{ formatYMD(dailyTaskForm.scheduled_date) }} (previous)
                                 </option>
                             </select>
                             <p v-if="dailyTaskForm.errors.scheduled_date" class="mt-1 text-xs text-red-500">{{ dailyTaskForm.errors.scheduled_date }}</p>
@@ -482,7 +519,7 @@ const removeDailyTask = (id: number) => {
                                 <p v-if="doc.caption" class="truncate text-[11px] italic text-neutral-500" :title="doc.caption">{{ doc.caption }}</p>
                                 <div class="mt-1 flex items-center justify-between">
                                     <span v-if="doc.progress !== null" class="rounded bg-brand-500 px-1.5 py-0.5 text-[10px] font-bold text-white">{{ doc.progress }}%</span>
-                                    <span class="ml-auto text-[10px] text-neutral-400">{{ doc.activity_date ? new Date(doc.activity_date).toLocaleDateString() : '' }}</span>
+                                    <span class="ml-auto text-[10px] text-neutral-400">{{ doc.activity_date ? formatYMD(doc.activity_date) : '' }}</span>
                                 </div>
                                 <div class="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition group-hover:opacity-100">
                                     <a
@@ -509,18 +546,26 @@ const removeDailyTask = (id: number) => {
                 <p v-else class="text-sm text-neutral-400">No documents uploaded yet. Upload daily during the activity.</p>
 
                 <form v-if="isLead" class="mt-6 space-y-3 border-t pt-4" @submit.prevent="upload">
-                    <div
-                        v-if="isTodayActivityDay"
-                        class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-brand-50 px-3 py-2 text-xs"
-                    >
-                        <span class="inline-flex items-center gap-1.5 font-medium text-brand-700"
-                            ><Calendar class="size-3.5" /> Uploading for current day — Day {{ todayDayNumber }} ({{ new Date(todayIso).toLocaleDateString() }})</span
+                    <div>
+                        <Label for="doc-date" class="mb-1 block text-xs font-medium text-neutral-600"
+                            >Activity Date * <span class="font-normal text-neutral-400">({{ timelineDates.length }} day{{ timelineDates.length === 1 ? '' : 's' }}: {{ timelineDates.join(', ') }})</span></Label
                         >
-                        <span class="text-[11px] text-neutral-500">Tagged automatically to today's event date</span>
-                    </div>
-                    <div v-else class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                        Today ({{ new Date(todayIso).toLocaleDateString() }}) is not an activity day. Uploads today will be saved but will <strong>not</strong> count toward progress. Activity days:
-                        {{ timelineDates.join(', ') }}
+                        <select
+                            id="doc-date"
+                            v-model="uploadForm.document_activity_date"
+                            required
+                            class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        >
+                            <option value="" disabled>Select activity day</option>
+                            <option v-for="(date, idx) in timelineDates" :key="date" :value="date">
+                                Day {{ idx + 1 }} — {{ formatYMD(date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) }}
+                                <template v-if="date === todayIso"> (Today)</template>
+                            </option>
+                        </select>
+                        <p class="mt-1 text-[11px] text-emerald-600">
+                            ✓ Day {{ timelineDates.indexOf(uploadForm.document_activity_date) + 1 }} — upload will count toward progress ({{ uploadedDaysCount }}/{{ activityDays.length }} days uploaded).
+                        </p>
+                        <p v-if="uploadForm.errors.document_activity_date" class="mt-1 text-xs text-red-500">{{ uploadForm.errors.document_activity_date }}</p>
                     </div>
                     <div>
                         <Label for="doc-caption" class="mb-1 block text-xs text-neutral-500">Caption (optional)</Label>
@@ -535,18 +580,11 @@ const removeDailyTask = (id: number) => {
                             @change="onDocuments"
                             required
                         />
-                        <Button
-                            type="submit"
-                            size="sm"
-                            :disabled="!uploadForm.documents.length || uploadForm.processing || !isTodayActivityDay"
-                            :title="!isTodayActivityDay ? 'Uploads only count on activity days' : undefined"
-                            >Upload for today</Button
+                        <Button type="submit" size="sm" :disabled="!uploadForm.documents.length || uploadForm.processing || !uploadForm.document_activity_date"
+                            >Upload for selected date</Button
                         >
                     </div>
-                    <p class="text-[11px] text-neutral-400">
-                        <template v-if="isTodayActivityDay">Files are tagged with today's event date (Day {{ todayDayNumber }}) and progress will advance.</template>
-                        <template v-else>Files are tagged with today's date but progress only advances on activity days.</template>
-                    </p>
+                    <p class="text-[11px] text-neutral-400">Files are tagged with the selected inclusive date. Progress advances only when you upload for an activity day.</p>
                 </form>
                 <p v-else class="mt-5 border-t pt-4 text-xs italic text-neutral-400">Only the program coordinator can upload daily documents.</p>
             </section>
